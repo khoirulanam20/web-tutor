@@ -3,9 +3,10 @@ import {
   Plus, Trash2, MoveUp, MoveDown, FileDown, Camera,
   Image as ImageIcon, Check, MousePointer2, Highlighter,
   X, Loader2, UploadCloud, FileCode, MoveRight, FileText,
-  Save, RotateCcw, Sparkles // Menambahkan icon Save, RotateCcw, dan Sparkles
+  Save, RotateCcw, Sparkles, Bot, Cpu // Menambahkan icon Bot dan Cpu
 } from 'lucide-react';
 import { getStepDescriptionFromImage } from './services/gemini';
+import { getStepDescriptionFromOpenRouter } from './services/openrouter';
 
 const App = () => {
   // --- KONFIGURASI STORAGE ---
@@ -60,6 +61,7 @@ const App = () => {
 
   // State untuk melacak langkah yang sedang diproses oleh AI
   const [processingAiSteps, setProcessingAiSteps] = useState([]); // Array of IDs
+  const [aiModel, setAiModel] = useState('gemini'); // 'gemini' | 'openrouter'
 
   // --- EFEK: AUTO SAVE ---
   useEffect(() => {
@@ -183,10 +185,17 @@ const App = () => {
     }
 
     setProcessingAiSteps(prev => [...prev, id]);
+    setProcessingAiSteps(prev => [...prev, id]);
     try {
-      // Buat gambar yang sudah ada anotasinya (flat version)
-      const flattenedImage = await flattenImageForExport(step.image, step.annotations);
-      const aiDescription = await getStepDescriptionFromImage(flattenedImage);
+      // Buat gambar yang sudah ada anotasinya (flat version) dengan ukuran max 800px untuk kecepatan AI
+      const flattenedImage = await flattenImageForExport(step.image, step.annotations, 800);
+
+      let aiDescription = "";
+      if (aiModel === 'gemini') {
+        aiDescription = await getStepDescriptionFromImage(flattenedImage);
+      } else {
+        aiDescription = await getStepDescriptionFromOpenRouter(flattenedImage);
+      }
 
       if (aiDescription) {
         updateStep(id, 'description', aiDescription);
@@ -356,16 +365,25 @@ const App = () => {
   };
 
   // --- HELPER PDF & HTML & DOCX ---
-  const flattenImageForExport = (imgUrl, annotations) => {
+  const flattenImageForExport = (imgUrl, annotations, maxWidth = null) => {
     return new Promise((resolve) => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       const img = new Image();
 
       img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
+        let width = img.width;
+        let height = img.height;
+
+        if (maxWidth && width > maxWidth) {
+          const scale = maxWidth / width;
+          width = maxWidth;
+          height = height * scale;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
 
         annotations.forEach(ann => {
           const x = (ann.x / 100) * canvas.width;
@@ -892,6 +910,24 @@ const App = () => {
 
           <div className="h-6 w-px bg-slate-200 mx-1 hidden md:block"></div>
 
+          <div className="flex items-center gap-3">
+            {/* MODEL TOGGLE */}
+            <div className="bg-slate-100 p-1 rounded-lg flex items-center mr-2">
+              <button
+                onClick={() => setAiModel('gemini')}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${aiModel === 'gemini' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}
+              >
+                <Sparkles size={14} /> Gemini
+              </button>
+              <button
+                onClick={() => setAiModel('openrouter')}
+                className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${aiModel === 'openrouter' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:bg-slate-200'}`}
+              >
+                <Cpu size={14} /> Qwen (OU)
+              </button>
+            </div>
+          </div>
+
           {/* TOMBOL EXPORT HTML */}
           <button
             onClick={generateHTML}
@@ -951,15 +987,16 @@ const App = () => {
                 />
                 {processingAiSteps.includes(step.id) ? (
                   <div className="absolute top-0 right-0 flex items-center gap-1 text-[10px] text-indigo-500 font-medium animate-pulse">
-                    <Sparkles size={12} /> Gemini AI
+                    {aiModel === 'gemini' ? <Sparkles size={12} /> : <Cpu size={12} />}
+                    {aiModel === 'gemini' ? "Gemini..." : "Qwen..."}
                   </div>
                 ) : (
                   <button
                     onClick={() => handleAiDescribe(step.id, step)}
                     className="absolute top-0 right-0 p-1 text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 rounded-md transition-all opacity-0 group-hover:opacity-100"
-                    title="Generate deskripsi dengan AI berdasarkan anotasi"
+                    title={`Generate deskripsi dengan ${aiModel === 'gemini' ? 'Gemini' : 'Qwen'}`}
                   >
-                    <Sparkles size={14} />
+                    {aiModel === 'gemini' ? <Sparkles size={14} /> : <Cpu size={14} />}
                   </button>
                 )}
               </div>
