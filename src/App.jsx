@@ -3,8 +3,9 @@ import {
   Plus, Trash2, MoveUp, MoveDown, FileDown, Camera,
   Image as ImageIcon, Check, MousePointer2, Highlighter,
   X, Loader2, UploadCloud, FileCode, MoveRight, FileText,
-  Save, RotateCcw // Menambahkan icon Save dan RotateCcw
+  Save, RotateCcw, Sparkles // Menambahkan icon Save, RotateCcw, dan Sparkles
 } from 'lucide-react';
+import { getStepDescriptionFromImage } from './services/gemini';
 
 const App = () => {
   // --- KONFIGURASI STORAGE ---
@@ -56,6 +57,9 @@ const App = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState(null); // {x, y}
   const [currentPos, setCurrentPos] = useState(null); // {x, y}
+
+  // State untuk melacak langkah yang sedang diproses oleh AI
+  const [processingAiSteps, setProcessingAiSteps] = useState([]); // Array of IDs
 
   // --- EFEK: AUTO SAVE ---
   useEffect(() => {
@@ -167,17 +171,47 @@ const App = () => {
     ));
   };
 
+  const handleAiDescribe = async (id, step) => {
+    if (!step?.image) {
+      alert("Unggah gambar terlebih dahulu untuk menggunakan AI.");
+      return;
+    }
+
+    if (!import.meta.env.VITE_GEMINI_API_KEY) {
+      alert("API Key Gemini belum disetel di .env");
+      return;
+    }
+
+    setProcessingAiSteps(prev => [...prev, id]);
+    try {
+      // Buat gambar yang sudah ada anotasinya (flat version)
+      const flattenedImage = await flattenImageForExport(step.image, step.annotations);
+      const aiDescription = await getStepDescriptionFromImage(flattenedImage);
+
+      if (aiDescription) {
+        updateStep(id, 'description', aiDescription);
+      }
+    } catch (error) {
+      console.error("Gagal generate deskripsi:", error);
+    } finally {
+      setProcessingAiSteps(prev => prev.filter(stepId => stepId !== id));
+    }
+  };
+
   // --- LOGIKA GAMBAR ---
 
   const handleImageUpload = (id, file) => {
     if (file && file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onload = (e) => {
+        const base64Image = e.target.result;
+
+        // Update gambar di state (tanpa AI otomatis)
         setSteps(prevSteps => prevSteps.map(s => {
           if (s.id === id) {
             return {
               ...s,
-              image: e.target.result,
+              image: base64Image,
               annotations: []
             };
           }
@@ -906,7 +940,29 @@ const App = () => {
             </div>
             <div className="p-5">
               <input value={step.title} onChange={(e) => updateStep(step.id, 'title', e.target.value)} className="w-full font-bold text-lg mb-2 text-slate-800 border-none p-0 focus:ring-0 placeholder-slate-300" placeholder="Judul langkah..." />
-              <textarea value={step.description} onChange={(e) => updateStep(step.id, 'description', e.target.value)} className="w-full text-slate-600 resize-none border-none p-0 focus:ring-0 text-sm mb-4" rows={2} placeholder="Deskripsi langkah..." />
+              <div className="relative group">
+                <textarea
+                  value={step.description}
+                  onChange={(e) => updateStep(step.id, 'description', e.target.value)}
+                  className={`w-full text-slate-600 resize-none border-none p-0 focus:ring-0 text-sm mb-4 ${processingAiSteps.includes(step.id) ? 'opacity-50' : ''}`}
+                  rows={2}
+                  placeholder={processingAiSteps.includes(step.id) ? "AI sedang berpikir..." : "Deskripsi langkah..."}
+                  disabled={processingAiSteps.includes(step.id)}
+                />
+                {processingAiSteps.includes(step.id) ? (
+                  <div className="absolute top-0 right-0 flex items-center gap-1 text-[10px] text-indigo-500 font-medium animate-pulse">
+                    <Sparkles size={12} /> Gemini AI
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => handleAiDescribe(step.id, step)}
+                    className="absolute top-0 right-0 p-1 text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 rounded-md transition-all opacity-0 group-hover:opacity-100"
+                    title="Generate deskripsi dengan AI berdasarkan anotasi"
+                  >
+                    <Sparkles size={14} />
+                  </button>
+                )}
+              </div>
 
               <div className={`relative group/image min-h-[150px] rounded-lg border-2 transition-all ${dragActiveStepId === step.id ? 'border-indigo-500 bg-indigo-50 border-solid' : 'border-slate-200 bg-slate-50 border-dashed'}`} onDragEnter={(e) => handleDragEnter(e, step.id)} onDragLeave={(e) => handleDragLeave(e, step.id)} onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, step.id)}>
                 {step.image ? (
@@ -964,7 +1020,6 @@ const App = () => {
                 >
                   <MoveRight size={16} /> Panah
                 </button>
-
               </div>
               <button onClick={() => setEditingStepId(null)} className="p-2 hover:bg-slate-200 rounded-full text-slate-500"><Check size={20} /></button>
             </div>
